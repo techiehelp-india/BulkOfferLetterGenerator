@@ -1,0 +1,307 @@
+"""
+Generate Letters Module
+-----------------------
+This module handles reading student data from Excel and generating
+individual offer letters using a Word template.
+
+Author: Automation Team
+"""
+
+import pandas as pd
+from docxtpl import DocxTemplate
+import os
+import re
+from datetime import datetime
+
+
+class OfferLetterGenerator:
+    """
+    A class to generate internship offer letters from Excel data.
+    
+    Attributes:
+        excel_file (str): Path to the Excel file containing student data
+        template_file (str): Path to the Word template file
+        output_folder (str): Directory to save generated offer letters
+    """
+    
+# Required columns in the Excel file
+    REQUIRED_COLUMNS = ['Name', 'Email', 'Domain', 'Duration', 'Start Date', 'College Name', 'TechieHelp Student Id']  # End Date optional
+    
+    def __init__(self, excel_file, template_file, output_folder='offer_letters'):
+        """
+        Initialize the OfferLetterGenerator.
+        
+        Args:
+            excel_file (str): Path to the Excel file
+            template_file (str): Path to the Word template
+            output_folder (str): Folder to save generated letters
+        """
+        self.excel_file = excel_file
+        self.template_file = template_file
+        self.output_folder = output_folder
+        
+        # Create output folder if it doesn't exist
+        if not os.path.exists(output_folder):
+            os.makedirs(output_folder)
+            print(f"✓ Created output folder: {output_folder}")
+    
+    def validate_excel_file(self, df):
+        """
+        Validate that the Excel file has all required columns.
+        
+        Args:
+            df (pandas.DataFrame): DataFrame to validate
+            
+        Returns:
+            tuple: (is_valid, error_message)
+        """
+        # Check if DataFrame is empty
+        if df.empty:
+            return False, "Excel file is empty"
+        
+        # Check for required columns
+        missing_columns = []
+        for col in self.REQUIRED_COLUMNS:
+            if col not in df.columns:
+                missing_columns.append(col)
+        
+        if missing_columns:
+            return False, f"Missing required columns: {', '.join(missing_columns)}"
+        
+        return True, ""
+    
+    def clean_data(self, df):
+        """
+        Clean the data by removing empty rows.
+        
+        Args:
+            df (pandas.DataFrame): DataFrame to clean
+            
+        Returns:
+            pandas.DataFrame: Cleaned DataFrame
+        """
+        # Remove rows with all NaN values
+        df = df.dropna(how='all')
+        
+        # Remove rows with empty Name or Email
+        df = df.dropna(subset=['Name', 'Email'])
+        
+        # Strip whitespace from string columns
+        for col in df.columns:
+            if df[col].dtype == 'object':
+                df[col] = df[col].str.strip()
+        
+        return df
+    
+    def sanitize_filename(self, name):
+        """
+        Sanitize a name to be used as a filename.
+        
+        Args:
+            name (str): Name to sanitize
+            
+        Returns:
+            str: Sanitized filename
+        """
+        # Remove special characters and replace spaces with underscores
+        name = re.sub(r'[^\w\s-]', '', name)
+        name = name.strip().replace(' ', '_')
+        return name
+    
+    def generate_single_letter(self, student_data, doc):
+        """
+        Generate a single offer letter for one student.
+        
+        Args:
+            student_data (dict): Dictionary containing student information
+            doc (docxtpl.DocxTemplate): Template document object
+            
+        Returns:
+            str: Path to the generated file
+        """
+        # Create context dictionary for template rendering
+        context = {
+            'name': student_data['Name'],
+            'domain': student_data['Domain'],
+            'duration': student_data['Duration'],
+            'start_date': student_data['Start Date'],
+            'college_name': student_data.get('College Name', ''),
+            'student_id': student_data.get('TechieHelp Student Id', ''),
+'end_date': student_data.get('End Date', ''),\n        'current_date': datetime.now().strftime("%d %B %Y")
+        }
+        
+        # Render the template with student data
+        doc.render(context)
+        
+        # Generate filename
+        safe_name = self.sanitize_filename(student_data['Name'])
+        filename = f"{safe_name}_Offer_Letter.docx"
+        output_path = os.path.join(self.output_folder, filename)
+        
+        # Save the document
+        doc.save(output_path)
+        
+        return output_path
+    
+    def generate_all_letters(self):
+        """
+        Generate offer letters for all students in the Excel file.
+        
+        Returns:
+            dict: Dictionary containing success and error information
+        """
+        results = {
+            'success': [],
+            'errors': [],
+            'total': 0,
+            'generated': 0
+        }
+        
+        try:
+            # Read Excel file
+            print(f"📂 Reading Excel file: {self.excel_file}")
+            df = pd.read_excel(self.excel_file, engine='openpyxl')
+            results['total'] = len(df)
+            
+            # Validate Excel file
+            is_valid, error_message = self.validate_excel_file(df)
+            if not is_valid:
+                results['errors'].append(f"Excel Validation Error: {error_message}")
+                return results
+            
+            # Clean data
+            df = self.clean_data(df)
+            results['total'] = len(df)
+            
+            if results['total'] == 0:
+                results['errors'].append("No valid data found in Excel file")
+                return results
+            
+            # Load template
+            print(f"📄 Loading template: {self.template_file}")
+            doc = DocxTemplate(self.template_file)
+            
+            # Generate letters for each student
+            print(f"\n📝 Generating {results['total']} offer letters...\n")
+            
+            for index, row in df.iterrows():
+                try:
+                    # Convert row to dictionary
+                    student_data = row.to_dict()
+                    
+                    # Format start date if it's a datetime object
+                    if isinstance(student_data.get('Start Date'), datetime):
+                        student_data['Start Date'] = student_data['Start Date'].strftime('%B %d, %Y')
+                    
+                    # Generate the letter
+                    output_path = self.generate_single_letter(student_data, doc)
+                    
+                    results['success'].append({
+                        'name': student_data['Name'],
+                        'email': student_data['Email'],
+                        'file': output_path
+                    })
+                    results['generated'] += 1
+                    
+                    print(f"  ✓ Generated: {student_data['Name']} -> {os.path.basename(output_path)}")
+                    
+                except Exception as e:
+                    error_msg = f"Error generating letter for {row.get('Name', 'Unknown')}: {str(e)}"
+                    results['errors'].append(error_msg)
+                    print(f"  ✗ {error_msg}")
+            
+            return results
+            
+        except FileNotFoundError:
+            results['errors'].append(f"Excel file not found: {self.excel_file}")
+            return results
+        except Exception as e:
+            results['errors'].append(f"Error reading Excel file: {str(e)}")
+            return results
+    
+    def generate_single_from_data(self, name, email, domain, duration, start_date):
+        """
+        Generate a single offer letter with provided data.
+        
+        Args:
+            name (str): Student name
+            email (str): Student email
+            domain (str): Internship domain
+            duration (str): Internship duration
+            start_date (str): Start date
+            
+        Returns:
+            str: Path to the generated file, or None if failed
+        """
+        try:
+            # Load template
+            doc = DocxTemplate(self.template_file)
+            
+            # Create student data dictionary
+            student_data = {
+                'Name': name,
+                'Email': email,
+                'Domain': domain,
+                'Duration': duration,
+                'Start Date': start_date
+            }
+            
+            # Generate the letter
+            output_path = self.generate_single_letter(student_data, doc)
+            
+            return output_path
+            
+        except Exception as e:
+            print(f"Error generating letter: {str(e)}")
+            return None
+
+
+def generate_letters_from_excel(excel_file, template_file, output_folder='offer_letters'):
+    """
+    Convenience function to generate all offer letters.
+    
+    Args:
+        excel_file (str): Path to Excel file
+        template_file (str): Path to Word template
+        output_folder (str): Output directory
+        
+    Returns:
+        dict: Results dictionary
+    """
+    generator = OfferLetterGenerator(excel_file, template_file, output_folder)
+    return generator.generate_all_letters()
+
+
+# Main execution for testing
+if __name__ == '__main__':
+    print("=" * 60)
+    print("Offer Letter Generator - Test Run")
+    print("=" * 60)
+    
+    # Check if required files exist
+    if not os.path.exists('students.xlsx'):
+        print("✗ students.xlsx not found!")
+        print("  Run: python create_sample_files.py first")
+    elif not os.path.exists('offer_template.docx'):
+        print("✗ offer_template.docx not found!")
+        print("  Run: python create_sample_files.py first")
+    else:
+        # Generate letters
+        results = generate_letters_from_excel(
+            'students.xlsx',
+            'offer_template.docx',
+            'offer_letters'
+        )
+        
+        # Print summary
+        print("\n" + "=" * 60)
+        print("SUMMARY")
+        print("=" * 60)
+        print(f"Total students: {results['total']}")
+        print(f"Generated: {results['generated']}")
+        
+        if results['errors']:
+            print(f"\nErrors ({len(results['errors'])}):")
+            for error in results['errors']:
+                print(f"  - {error}")
+

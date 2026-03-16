@@ -1,0 +1,13 @@
+[server]
+enableCORS = false
+enableXsrfProtection = false
+headless = false
+port = 8501
+enableStaticServing = false
+
+[global]
+developmentMode = false
+
+
+
+

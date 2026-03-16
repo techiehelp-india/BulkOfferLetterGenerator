@@ -1,0 +1,9 @@
+# Internship Offer Letter Automation Tool - Dependencies
+# Install all dependencies using: pip install -r requirements.txt
+
+streamlit>=1.30.0
+pandas>=1.5.0
+docxtpl>=0.16.0
+openpyxl>=3.0.0
+python-docx>=0.8.0
+

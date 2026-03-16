@@ -1,0 +1,400 @@
+"""
+Internship Offer Letter Generator - Streamlit Application
+---------------------------------------------------------
+A modern web application that generates internship offer letters
+in bulk from an Excel file using a Word template.
+
+Author: Automation Team
+"""
+
+import streamlit as st
+import pandas as pd
+from docxtpl import DocxTemplate
+import os
+import zipfile
+import io
+from datetime import datetime
+import re
+
+
+# ============================================================================
+# CONFIGURATION
+# ============================================================================
+
+# Page configuration
+st.set_page_config(
+    page_title="Internship Offer Letter Generator",
+    page_icon="📧",
+    layout="centered",
+    initial_sidebar_state="collapsed"
+)
+
+# Required columns in Excel
+REQUIRED_COLUMNS = ['Name', 'Email', 'Domain', 'Duration', 'Start Date', 'College Name', 'TechieHelp Student Id']  # End Date optional
+
+# Template placeholders
+PLACEHOLDERS = ['{{name}}', '{{domain}}', '{{duration}}', '{{start_date}}', '{{college_name}}', '{{student_id}}']
+
+# Output folder
+OUTPUT_FOLDER = 'offer_letters'
+
+
+# ============================================================================
+# FUNCTIONS
+# ============================================================================
+
+def sanitize_filename(name):
+    """
+    Sanitize a name to be used as a filename.
+    Removes special characters and replaces spaces with underscores.
+    
+    Args:
+        name (str): Name to sanitize
+        
+    Returns:
+        str: Sanitized filename
+    """
+    # Remove special characters (keep only letters, numbers, spaces, hyphens)
+    name = re.sub(r'[^\w\s-]', '', name)
+    # Replace spaces with underscores
+    name = name.strip().replace(' ', '_')
+    return name
+
+
+def validate_excel(df):
+    """
+    Validate that the Excel file has all required columns.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame to validate
+        
+    Returns:
+        tuple: (is_valid, error_message)
+    """
+    # Check if DataFrame is empty
+    if df.empty:
+        return False, "The Excel file is empty. Please add student data."
+    
+    # Check for required columns
+    missing_columns = []
+    for col in REQUIRED_COLUMNS:
+        if col not in df.columns:
+            missing_columns.append(col)
+    
+    if missing_columns:
+        return False, f"Missing required columns: {', '.join(missing_columns)}. Please ensure your Excel file has: {', '.join(REQUIRED_COLUMNS)}"
+    
+    return True, ""
+
+
+def clean_data(df):
+    """
+    Clean the data by removing empty rows.
+    
+    Args:
+        df (pandas.DataFrame): DataFrame to clean
+        
+    Returns:
+        pandas.DataFrame: Cleaned DataFrame
+    """
+    # Remove rows with all NaN values
+    df = df.dropna(how='all')
+    
+    # Remove rows with empty Name or Email
+    df = df.dropna(subset=['Name', 'Email'])
+    
+    # Strip whitespace from string columns
+    for col in df.columns:
+        if df[col].dtype == 'object':
+            df[col] = df[col].str.strip()
+    
+    return df
+
+
+def generate_single_letter(student_data, template_path, output_folder):
+    """
+    Generate a single offer letter for one student.
+    
+    Args:
+        student_data (dict): Dictionary containing student information
+        template_path (str): Path to the Word template
+        output_folder (str): Folder to save generated letters
+        
+    Returns:
+        str: Path to the generated file, or None if failed
+    """
+    try:
+        # Load template
+        doc = DocxTemplate(template_path)
+        
+        # Create context dictionary for template rendering
+        context = {
+            'name': student_data['Name'],
+            'domain': student_data['Domain'],
+            'duration': student_data['Duration'],
+            'start_date': student_data['Start Date'],
+            'college_name': student_data.get('College Name', ''),
+            'student_id': student_data.get('TechieHelp Student Id', ''),
+'end_date': student_data.get('End Date', ''),\n        'current_date': datetime.now().strftime("%d %B %Y")
+        }
+        
+        # Render the template with student data
+        doc.render(context)
+        
+        # Generate filename
+        safe_name = sanitize_filename(student_data['Name'])
+        filename = f"{safe_name}_Offer_Letter.docx"
+        output_path = os.path.join(output_folder, filename)
+        
+        # Save the document
+        doc.save(output_path)
+        
+        return output_path
+        
+    except Exception as e:
+        st.error(f"Error generating letter for {student_data.get('Name', 'Unknown')}: {str(e)}")
+        return None
+
+
+def create_zip_file(output_folder):
+    """
+    Create a ZIP file containing all generated offer letters.
+    
+    Args:
+        output_folder (str): Folder containing generated letters
+        
+    Returns:
+        bytes: ZIP file content as bytes
+    """
+    # Create a bytes buffer
+    zip_buffer = io.BytesIO()
+    
+    # Create ZIP file
+    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zipf:
+        # Get all .docx files in the output folder
+        for root, dirs, files in os.walk(output_folder):
+            for file in files:
+                if file.endswith('.docx'):
+                    file_path = os.path.join(root, file)
+                    # Add file to ZIP (relative path)
+                    arcname = file
+                    zipf.write(file_path, arcname)
+    
+    # Get the bytes content
+    zip_buffer.seek(0)
+    return zip_buffer.getvalue()
+
+
+# ============================================================================
+# STREAMLIT UI
+# ============================================================================
+
+def main():
+    """
+    Main function to run the Streamlit application.
+    """
+    
+    # Custom CSS for styling
+    st.markdown("""
+        <style>
+        .main-header {
+            font-size: 36px;
+            font-weight: bold;
+            color: #1f77b4;
+            text-align: center;
+            margin-bottom: 30px;
+        }
+        .sub-header {
+            font-size: 24px;
+            font-weight: bold;
+            color: #2c3e50;
+            margin-top: 20px;
+        }
+        .success-message {
+            padding: 15px;
+            background-color: #d4edda;
+            border-radius: 5px;
+            color: #155724;
+        }
+        .info-box {
+            padding: 15px;
+            background-color: #e7f3ff;
+            border-radius: 5px;
+            border-left: 4px solid #1f77b4;
+        }
+        </style>
+    """, unsafe_allow_html=True)
+    
+    # Title
+    st.markdown('<p class="main-header">📧 Internship Offer Letter Generator</p>', unsafe_allow_html=True)
+    
+    # Create output folder if it doesn't exist
+    if not os.path.exists(OUTPUT_FOLDER):
+        os.makedirs(OUTPUT_FOLDER)
+    
+    # Main content area
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        # File uploader
+        uploaded_file = st.file_uploader(
+            "📁 Upload Excel File (.xlsx)",
+            type=['xlsx', 'xls'],
+            help="Upload an Excel file containing student data"
+        )
+    
+    with col2:
+        # Show template file info
+        if os.path.exists('offer_template.docx'):
+            st.success("✅ Template found!")
+        else:
+            st.warning("⚠️ Template not found!")
+    
+    # Create two columns for buttons
+    button_col1, button_col2 = st.columns([1, 1])
+    
+    # Generate button
+    with button_col1:
+        generate_button = st.button(
+            "🚀 Generate Offer Letters",
+            type="primary",
+            use_container_width=True,
+            disabled=uploaded_file is None
+        )
+    
+    # Clear button
+    with button_col2:
+        clear_button = st.button(
+            "🗑️ Clear Output",
+            use_container_width=True
+        )
+    
+    # Clear output folder if button clicked
+    if clear_button:
+        # Remove all files in output folder
+        for file in os.listdir(OUTPUT_FOLDER):
+            file_path = os.path.join(OUTPUT_FOLDER, file)
+            if os.path.isfile(file_path):
+                os.remove(file_path)
+        st.success("✅ Output folder cleared!")
+    
+    # Generate letters when button is clicked
+    if generate_button and uploaded_file is not None:
+        try:
+            # Read Excel file
+            df = pd.read_excel(uploaded_file, engine='openpyxl')
+            
+            # Validate Excel file
+            is_valid, error_message = validate_excel(df)
+            
+            if not is_valid:
+                st.error(f"❌ {error_message}")
+                st.stop()
+            
+            # Clean data
+            df = clean_data(df)
+            
+            if df.empty:
+                st.error("❌ No valid data found in the Excel file.")
+                st.stop()
+            
+            # Check if template exists
+            if not os.path.exists('offer_template.docx'):
+                st.error("❌ Template file 'offer_template.docx' not found! Please ensure it exists in the project folder.")
+                st.stop()
+            
+            # Clear previous output
+            for file in os.listdir(OUTPUT_FOLDER):
+                file_path = os.path.join(OUTPUT_FOLDER, file)
+                if os.path.isfile(file_path):
+                    os.remove(file_path)
+            
+            # Progress bar
+            progress_bar = st.progress(0)
+            status_text = st.empty()
+            
+            # Generate letters
+            total_students = len(df)
+            generated_count = 0
+            generated_files = []
+            
+            for index, row in df.iterrows():
+                # Update progress
+                progress = (index + 1) / total_students
+                progress_bar.progress(progress)
+                status_text.text(f"Generating letter {index + 1} of {total_students}...")
+                
+                # Convert row to dictionary
+                student_data = row.to_dict()
+                
+                # Format start date if it's a datetime object
+                if isinstance(student_data.get('Start Date'), datetime):
+                    student_data['Start Date'] = student_data['Start Date'].strftime('%B %d, %Y')
+                
+                # Generate the letter
+                output_path = generate_single_letter(
+                    student_data,
+                    'offer_template.docx',
+                    OUTPUT_FOLDER
+                )
+                
+                if output_path:
+                    generated_count += 1
+                    generated_files.append(os.path.basename(output_path))
+            
+            # Complete progress
+            progress_bar.progress(100)
+            status_text.text("✅ Generation complete!")
+            
+            # Show success message
+            st.markdown(f"""
+            <div class="success-message">
+                <h3>🎉 Success!</h3>
+                <p>Generated <strong>{generated_count}</strong> offer letters out of <strong>{total_students}</strong> students.</p>
+            </div>
+            """, unsafe_allow_html=True)
+            
+            # Show generated files
+            if generated_files:
+                with st.expander("📄 Generated Files", expanded=True):
+                    for file in generated_files:
+                        st.write(f"✅ {file}")
+            
+            # Create ZIP file for download
+            if generated_files:
+                zip_content = create_zip_file(OUTPUT_FOLDER)
+                
+                st.download_button(
+                    label="📥 Download All Letters (ZIP)",
+                    data=zip_content,
+                    file_name="offer_letters.zip",
+                    mime="application/zip",
+                    type="primary"
+                )
+        
+        except Exception as e:
+            st.error(f"❌ An error occurred: {str(e)}")
+    
+    # Show existing files if any
+    if os.path.exists(OUTPUT_FOLDER):
+        existing_files = [f for f in os.listdir(OUTPUT_FOLDER) if f.endswith('.docx')]
+        if existing_files and not (generate_button and uploaded_file is not None):
+            with st.expander("📄 Previously Generated Files"):
+                for file in existing_files:
+                    st.write(f"📄 {file}")
+    
+    # Footer
+    st.markdown("---")
+    st.markdown(
+        "<p style='text-align: center; color: gray;'>© 2024 Internship Offer Letter Generator | Built with Streamlit</p>",
+        unsafe_allow_html=True
+    )
+
+
+# ============================================================================
+# MAIN ENTRY POINT
+# ============================================================================
+
+if __name__ == "__main__":
+    main()
+
