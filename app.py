@@ -18,7 +18,7 @@ from email_sender import EmailSender
 st.set_page_config(page_title="Bulk Generator", page_icon="🏆", layout="wide")
 
 OFFER_REQUIRED_COLUMNS = ['name', 'email', 'domain', 'duration', 'start_date', 'college_name', 'techiehelp_student_id']
-CERT_REQUIRED_COLUMNS = ['name', 'email', 'student_id', 'college_name', 'domain', 'start_date', 'end_date']
+CERT_REQUIRED_COLUMNS = ['name', 'email', 'domain']
 SHARED_REQUIRED_COLUMNS = list(set(OFFER_REQUIRED_COLUMNS + CERT_REQUIRED_COLUMNS))  # Case-insensitive unique columns
 OFFER_OUTPUT_FOLDER = 'offer_letters'
 CERT_OUTPUT_FOLDER = 'certificates'
@@ -56,7 +56,8 @@ def generate_single_certificate(student_data, template_path, output_folder):
         doc = DocxTemplate(template_path)
         context = {
             'name': student_data.get('name', ''),
-            'student_id': student_data.get('student_id', ''),
+            'student_id': student_data.get('student_id') or student_data.get('techiehelp_student_id') or "N/A",
+
             'college_name': student_data.get('college_name', ''),
             'domain': student_data.get('domain', ''),
             'start_date': student_data.get('start_date', ''),
@@ -118,11 +119,27 @@ def generate_offer_letter(shared_data):
 
 def generate_certificate(shared_data):
     """Generate certificates from shared data (filter rows with cert columns)."""
-    cert_rows = [row for row in shared_data if all(row.get(col, '') for col in CERT_REQUIRED_COLUMNS)]
+    st.info(f"📊 Total rows loaded: {len(shared_data) if shared_data else 0}")
+    if shared_data:
+        st.info(f"📋 Columns: {list(shared_data[0].keys())}")
+        st.info("📄 First 2 rows:")
+        st.json(shared_data[:2])
+    cert_rows = []
+    skipped = []
+    for row in shared_data:
+        missing = [col for col in CERT_REQUIRED_COLUMNS if not row.get(col, '').strip()]
+        if not missing:
+            cert_rows.append(row)
+        else:
+            skipped.append({'name': row.get('name', 'N/A'), 'missing': missing})
+    st.info(f"✅ Found {len(cert_rows)} cert candidates (skipped {len(skipped)})")
+    if skipped:
+        st.warning(f"Skipped rows: {skipped[:5]}...")
     results = []
     progress_placeholder = st.empty()
     progress_bar = progress_placeholder.progress(0)
     status_text = st.empty()
+    failed = 0
     
     for i, row in enumerate(cert_rows):
         progress_bar.progress((i + 1) / len(cert_rows))
@@ -130,6 +147,9 @@ def generate_certificate(shared_data):
         pdf_path = generate_single_certificate(row, 'certificate_template.docx', CERT_OUTPUT_FOLDER)
         if pdf_path:
             results.append({'name': row['name'], 'email': row['email'], 'pdf_path': pdf_path, 'type': 'cert'})
+        else:
+            st.warning(f"PDF failed for {row['name']} cert")
+            failed += 1
     
     progress_placeholder.empty()
     status_text.empty()
@@ -244,7 +264,13 @@ if uploaded_shared:
         msg = validate_excel(df, OFFER_REQUIRED_COLUMNS, CERT_REQUIRED_COLUMNS)
         st.info(f"📊 Columns analysis: {msg}")
         shared_data = df.fillna('').to_dict('records')  # Handle NaN as ''
-        st.session_state.shared_data = [{k.lower().replace(' ', '_').replace('_', '_'): str(v).strip() if pd.notna(v) else '' for k, v in row.items()} for row in shared_data]
+        normalized_data = []
+        for row in shared_data:
+            new_row = {re.sub(r'\\s+', '_', k.lower()): str(v).strip() if pd.notna(v) else '' for k, v in row.items()}
+            if 'help_stud' in new_row:
+                new_row['techiehelp_student_id'] = new_row.pop('help_stud')
+            normalized_data.append(new_row)
+        st.session_state.shared_data = normalized_data
         
         st.success(f"✅ Loaded {len(st.session_state.shared_data)} rows")
         st.dataframe(pd.DataFrame(st.session_state.shared_data), use_container_width=True)
