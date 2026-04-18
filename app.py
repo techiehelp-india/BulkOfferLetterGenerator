@@ -17,7 +17,9 @@ from email_sender import EmailSender
 
 st.set_page_config(page_title="Bulk Generator", page_icon="🏆", layout="wide")
 
-OFFER_REQUIRED_COLUMNS = ['name', 'email', 'domain', 'duration', 'start_date', 'college_name', 'techiehelp_student_id']
+DEBUG = False
+
+OFFER_REQUIRED_COLUMNS = ['name', 'email', 'domain']
 CERT_REQUIRED_COLUMNS = ['name', 'email', 'domain']
 SHARED_REQUIRED_COLUMNS = list(set(OFFER_REQUIRED_COLUMNS + CERT_REQUIRED_COLUMNS))  # Case-insensitive unique columns
 OFFER_OUTPUT_FOLDER = 'offer_letters'
@@ -95,8 +97,30 @@ def create_zip_cert(output_folder):
 
 def generate_offer_letter(shared_data):
     """Generate offer letters from shared data (filter rows with offer columns)."""
-    offer_rows = [row for row in shared_data if all(row.get(col, '') for col in OFFER_REQUIRED_COLUMNS)]
-    st.info(f"Found {len(offer_rows)} offer candidates")
+    if DEBUG:
+        st.info(f"📊 Total rows loaded: {len(shared_data) if shared_data else 0}")
+        if shared_data:
+            st.info(f"📋 Columns: {list(shared_data[0].keys())}")
+            st.info("📄 First 2 rows:")
+            st.json(shared_data[:2])
+
+    offer_rows = []
+    skipped = []
+    for row in shared_data:
+        missing = [col for col in OFFER_REQUIRED_COLUMNS if not str(row.get(col, '')).strip()]
+        if not missing:
+            offer_rows.append(row)
+        else:
+            skipped.append({'name': row.get('name', 'N/A'), 'missing': missing})
+
+    st.info(f"✅ Found {len(offer_rows)} offer candidates (skipped {len(skipped)})")
+    if skipped:
+        st.warning(f"Skipped rows: {skipped[:5]}...")
+
+    if not offer_rows:
+        st.error("❌ No valid rows found. Please check your Excel data.")
+        return []
+
     results = []
     progress_placeholder = st.empty()
     progress_bar = progress_placeholder.progress(0)
@@ -119,11 +143,12 @@ def generate_offer_letter(shared_data):
 
 def generate_certificate(shared_data):
     """Generate certificates from shared data (filter rows with cert columns)."""
-    st.info(f"📊 Total rows loaded: {len(shared_data) if shared_data else 0}")
-    if shared_data:
-        st.info(f"📋 Columns: {list(shared_data[0].keys())}")
-        st.info("📄 First 2 rows:")
-        st.json(shared_data[:2])
+    if DEBUG:
+        st.info(f"📊 Total rows loaded: {len(shared_data) if shared_data else 0}")
+        if shared_data:
+            st.info(f"📋 Columns: {list(shared_data[0].keys())}")
+            st.info("📄 First 2 rows:")
+            st.json(shared_data[:2])
     cert_rows = []
     skipped = []
     for row in shared_data:
@@ -196,6 +221,35 @@ TechieHelp Team"""
     return results
 
 
+def execute_bulk_custom_email(recipients, subject, template_message, attachment_path=None):
+    if not st.secrets.get("gmail"):
+        st.error("❌ Configure .streamlit/secrets.toml with Gmail app password")
+        return None
+    gmail = st.secrets["gmail"]
+    sender = EmailSender(gmail.get("smtp_server"), int(gmail.get("smtp_port")), gmail["sender_email"], gmail["sender_password"])
+    
+    results = {'sent': 0, 'errors': []}
+    progress_placeholder = st.empty()
+    progress_bar = progress_placeholder.progress(0)
+    status_text = st.empty()
+    
+    for i, recipient in enumerate(recipients):
+        progress_bar.progress((i + 1) / len(recipients))
+        email = recipient['email']
+        name = recipient.get('name', 'User')
+        status_text.text(f"Sending email {i+1}/{len(recipients)}: {email}")
+        
+        message = template_message.replace('{name}', name)
+        success, msg = sender.send_email(email, name, subject, message, attachment_path)
+        if success:
+            results['sent'] += 1
+        else:
+            results['errors'].append({'email': email, 'error': msg})
+            
+    progress_placeholder.empty()
+    status_text.empty()
+    return results
+
 def clean_data(df):
     df = df.dropna(how='all').dropna(subset=['Name', 'Email'])
     for col in df.columns:
@@ -209,8 +263,8 @@ def generate_single_letter(student_data, template_path, output_folder):
         context = {
             'name': student_data['name'],
             'domain': student_data['domain'],
-            'duration': student_data['duration'],
-            'start_date': student_data['start_date'],
+            'duration': student_data.get('duration', ''),
+            'start_date': student_data.get('start_date', ''),
             'college_name': student_data.get('college_name', ''),
             'student_id': student_data.get('techiehelp_student_id', student_data.get('student_id', '')),
             'end_date': student_data.get('end_date', ''),
@@ -223,7 +277,7 @@ def generate_single_letter(student_data, template_path, output_folder):
         doc.save(docx_path)
         
         converter = PDFConverter(output_folder)
-        pdf_path = os.path.join(output_folder, f"offer_letter_{safe_name}.pdf")
+        pdf_path = os.path.join(output_folder, f"{safe_name}_offer_letter.pdf")
         success = converter.convert_single(docx_path, pdf_path)
         
         try:
@@ -262,18 +316,23 @@ if uploaded_shared:
     try:
         df = pd.read_excel(uploaded_shared)
         msg = validate_excel(df, OFFER_REQUIRED_COLUMNS, CERT_REQUIRED_COLUMNS)
-        st.info(f"📊 Columns analysis: {msg}")
+        if DEBUG:
+            st.info(f"📊 Columns analysis: {msg}")
         shared_data = df.fillna('').to_dict('records')  # Handle NaN as ''
         normalized_data = []
         for row in shared_data:
-            new_row = {re.sub(r'\\s+', '_', k.lower()): str(v).strip() if pd.notna(v) else '' for k, v in row.items()}
-            if 'help_stud' in new_row:
-                new_row['techiehelp_student_id'] = new_row.pop('help_stud')
+            new_row = {}
+            for k, v in row.items():
+                k_str = str(k).strip().lower().replace(' ', '_')
+                if k_str == 'help_stud':
+                    k_str = 'techiehelp_student_id'
+                new_row[k_str] = str(v).strip() if pd.notna(v) else ''
             normalized_data.append(new_row)
         st.session_state.shared_data = normalized_data
         
         st.success(f"✅ Loaded {len(st.session_state.shared_data)} rows")
-        st.dataframe(pd.DataFrame(st.session_state.shared_data), use_container_width=True)
+        if DEBUG:
+            st.dataframe(pd.DataFrame(st.session_state.shared_data), use_container_width=True)
         
         if st.button("🗑️ Clear Shared Data"):
             st.session_state.shared_data = []
@@ -292,7 +351,7 @@ col2.metric("Generated", st.session_state.offer_count + st.session_state.cert_co
 st.markdown("---")
 
 
-tab1, tab2, tab3 = st.tabs(["1️⃣ Offer Letters", "2️⃣ Certificates", "3️⃣ Send Emails"])
+tab1, tab2, tab3, tab4 = st.tabs(["1️⃣ Offer Letters", "2️⃣ Certificates", "3️⃣ Send Emails", "4️⃣ Custom Bulk Email"])
 
 with tab1:
     st.header("Offer Letters (using shared data)")
@@ -381,6 +440,71 @@ sender_password = "your_app_password"
 smtp_server = "smtp.gmail.com"
 smtp_port = 587
 """)
+
+with tab4:
+    st.header("📧 Bulk Email Sender")
+    st.markdown("Send custom emails with attachments to a list of email addresses from an Excel file.")
+    
+    bulk_upload = st.file_uploader("Upload Excel with an 'email' column", type=['xlsx', 'xls'], key="bulk_email_upload")
+    
+    if bulk_upload:
+        try:
+            df_bulk = pd.read_excel(bulk_upload)
+            email_col = next((c for c in df_bulk.columns if str(c).strip().lower() == 'email'), None)
+            name_col = next((c for c in df_bulk.columns if str(c).strip().lower() == 'name'), None)
+            
+            if not email_col:
+                st.error("❌ The uploaded Excel must contain an 'email' column.")
+            else:
+                raw_emails = df_bulk.to_dict('records')
+                valid_recipients = []
+                for row in raw_emails:
+                    email_val = str(row.get(email_col, '')).strip()
+                    if email_val and pd.notna(row.get(email_col)) and '@' in email_val:
+                        name_val = str(row.get(name_col, 'User')).strip() if name_col else 'User'
+                        valid_recipients.append({'email': email_val, 'name': name_val})
+                
+                st.success(f"✅ Extracted {len(valid_recipients)} valid emails.")
+                
+                with st.form("bulk_email_form"):
+                    st.subheader("Email Composer")
+                    subject = st.text_input("Subject", "Important Notification")
+                    message = st.text_area("Message", "Hello {name},\n\nYour message here...\n\nBest,\nTeam")
+                    st.caption("Tip: You can use {name} to personalize if your Excel has a 'name' column.")
+                    
+                    attachment = st.file_uploader("Optional Attachment (PDF, DOCX, Image)", type=['pdf', 'docx', 'png', 'jpg', 'jpeg'])
+                    
+                    submitted = st.form_submit_button("🚀 Send to All", disabled=len(valid_recipients)==0)
+                    
+                    if submitted:
+                        attachment_path = None
+                        if attachment:
+                            temp_dir = "temp_attachments"
+                            if not os.path.exists(temp_dir):
+                                os.makedirs(temp_dir)
+                            attachment_path = os.path.join(temp_dir, attachment.name)
+                            with open(attachment_path, "wb") as f:
+                                f.write(attachment.getbuffer())
+                                
+                        with st.spinner("Sending bulk custom emails..."):
+                            results = execute_bulk_custom_email(valid_recipients, subject, message, attachment_path)
+                            
+                        if results:
+                            st.success(f"✅ Successfully sent {results['sent']}/{len(valid_recipients)} emails.")
+                            if results['errors']:
+                                st.error(f"❌ Failed to send {len(results['errors'])} emails.")
+                                with st.expander("View Failed Emails"):
+                                    for e in results['errors']:
+                                        st.write(f"- {e['email']}: {e['error']}")
+                                        
+                        if attachment_path and os.path.exists(attachment_path):
+                            try:
+                                os.remove(attachment_path)
+                            except:
+                                pass
+                            
+        except Exception as e:
+            st.error(f"Error processing file: {e}")
 
 # App runs directly without main() call
 st.caption("✅ Syntax fixed - Bulk offer letter generator ready!")
