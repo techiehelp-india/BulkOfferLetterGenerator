@@ -20,7 +20,7 @@ def main():
     offer_letters_dir = 'offer_letters'
     smtp_server = 'smtp.gmail.com'
     smtp_port = 587
-    subject = "Offer Letter from TechieHelp"
+    subject = "🎉 Congratulations! You’re Selected for TechieHelp Internship 2026"
     
     # Input credentials securely
     sender_email = input("Enter sender Gmail: ").strip()
@@ -78,28 +78,50 @@ def main():
             failed.append({'name': name, 'email': email, 'error': error})
             continue
         
-        # Personalized body
-        body = f"""Dear {name},
-
-Congratulations on your selection!
-
-Here are your offer details:
-• College Name: {college}
-• TechieHelp Student ID: {student_id}
-• Domain: {domain}
-• Duration: {duration}
-• Date of Issued: {issue_date}
-
-Please find your Offer Letter PDF attached.
-
-We look forward to your contributions!
-
-Best regards,
-TechieHelp Team"""
+        display_name = name if name and str(name).strip() else "Candidate"
+        
+        # Personalized HTML body
+        body = f"""<html>
+<head>
+<style>
+    body {{ font-family: Arial, sans-serif; line-height: 1.6; color: #333333; }}
+    a {{ color: #0066cc; text-decoration: none; }}
+    a:hover {{ text-decoration: underline; }}
+</style>
+</head>
+<body>
+    <p>Dear {display_name},</p>
+    
+    <p>You have been selected for the TECHIEHELP – Industry-Oriented Internship Program 2026.<br>
+    We’re excited to have you onboard as you take the next step toward skill development and career growth.</p>
+    
+    <p>📝 <strong>Important:</strong> Please ensure that you select your internship department correctly (e.g., Android Developer) during further processes.</p>
+    
+    <p>🏅 <strong>Claim Your LinkedIn Internship Badge:</strong><br>
+    <a href="https://twibbo.nz/techiehelpinternsbadges">https://twibbo.nz/techiehelpinternsbadges</a></p>
+    
+    <p>📌 <strong>Learn more about your internship program:</strong><br>
+    <a href="https://www.techiehelp.in/careers/training-internships">https://www.techiehelp.in/careers/training-internships</a></p>
+    
+    <p>⚠️ Please check your Inbox & Spam folder regularly for important updates and communication.</p>
+    
+    <p>Best Regards,<br>
+    Team TechieHelp<br>
+    Empowering Students. Building Futures.</p>
+    
+    <p>🌐 <a href="https://www.techiehelp.in">https://www.techiehelp.in</a><br>
+    📧 <a href="mailto:support@techiehelp.in">support@techiehelp.in</a></p>
+    
+    <p>Amit Kumar<br>
+    Founder & CEO – TechieHelp<br>
+    +91 76738 25079<br>
+    Jodhpur, Rajasthan – India</p>
+</body>
+</html>"""
         
         # Send
         try:
-            success, msg = sender.send_email(email, name, subject, body, pdf_path)
+            success, msg = sender.send_email(email, name, subject, body, pdf_path, is_html=True)
             if success:
                 print(f"✅ {msg}")
                 sent += 1

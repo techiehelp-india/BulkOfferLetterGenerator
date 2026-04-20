@@ -306,205 +306,284 @@ st.session_state.setdefault('cert_generated', [])
 st.session_state.setdefault('offer_count', 0)
 st.session_state.setdefault('cert_count', 0)
 
-st.title("🏆 Bulk Generator - Shared Data System")
-
-# Shared Excel Upload (SINGLE upload for both tabs)
-st.header("📁 Shared Data Upload")
-uploaded_shared = st.file_uploader("Upload Shared Excel (contains both offer & cert data)", type=['xlsx'], key="shared_upload")
-
-if uploaded_shared:
-    try:
-        df = pd.read_excel(uploaded_shared)
-        msg = validate_excel(df, OFFER_REQUIRED_COLUMNS, CERT_REQUIRED_COLUMNS)
-        if DEBUG:
-            st.info(f"📊 Columns analysis: {msg}")
-        shared_data = df.fillna('').to_dict('records')  # Handle NaN as ''
-        normalized_data = []
-        for row in shared_data:
-            new_row = {}
-            for k, v in row.items():
-                k_str = str(k).strip().lower().replace(' ', '_')
-                if k_str == 'help_stud':
-                    k_str = 'techiehelp_student_id'
-                new_row[k_str] = str(v).strip() if pd.notna(v) else ''
-            normalized_data.append(new_row)
-        st.session_state.shared_data = normalized_data
-        
-        st.success(f"✅ Loaded {len(st.session_state.shared_data)} rows")
-        if DEBUG:
-            st.dataframe(pd.DataFrame(st.session_state.shared_data), use_container_width=True)
-        
-        if st.button("🗑️ Clear Shared Data"):
-            st.session_state.shared_data = []
-            st.session_state.offer_generated = []
-            st.session_state.cert_generated = []
-            st.session_state.offer_count = 0
-            st.session_state.cert_count = 0
-            st.rerun()
-    except Exception as e:
-        st.error(f"Upload error: {e}")
-
-col1, col2 = st.columns(2)
-col1.metric("Shared Data", len(st.session_state.shared_data))
-col2.metric("Generated", st.session_state.offer_count + st.session_state.cert_count)
-
-st.markdown("---")
-
-
-tab1, tab2, tab3, tab4 = st.tabs(["1️⃣ Offer Letters", "2️⃣ Certificates", "3️⃣ Send Emails", "4️⃣ Custom Bulk Email"])
-
-with tab1:
-    st.header("Offer Letters (using shared data)")
-    col1, col2 = st.columns(2)
-    offer_template_status = "✅ Found" if os.path.exists('offer_template.docx') else "❌ Missing"
-    col1.metric("Offer Template", offer_template_status)
-    col2.metric("Offer Generated", len(st.session_state.offer_generated))
+st.markdown("""
+<style>
+    .stApp { background-color: #F9FAFB; }
+    h1, h2, h3 { color: #111827; font-weight: 600; margin-bottom: 0.2rem !important; }
+    h1 { font-size: 1.75rem !important; }
+    h2 { font-size: 1.4rem !important; }
+    p { margin-bottom: 0.2rem !important; }
+    .block-container { padding-top: 1.5rem !important; padding-bottom: 1.5rem !important; }
     
-    if st.button("🚀 Generate Offers from Shared Data", disabled=not st.session_state.shared_data):
-        with st.spinner("Generating offers..."):
-            st.session_state.offer_generated = generate_offer_letter(st.session_state.shared_data)
-            st.session_state.offer_count = len(st.session_state.offer_generated)
-        
-        st.success(f"✅ {st.session_state.offer_count} offer letters generated!")
-        st.subheader("Generated Files:")
-        for item in st.session_state.offer_generated:
-            filename = os.path.basename(item.get('pdf_path') or item.get('pdf', ''))
-            st.success(f"📄 {filename} → {item['name']}")
-        
-        st.download_button("📦 Download Offers ZIP", create_zip(OFFER_OUTPUT_FOLDER), "offers.zip", "application/zip")
+    .stButton>button, .stDownloadButton>button {
+        color: white;
+        border-radius: 6px;
+        border: none;
+        padding: 0.35rem 1rem !important;
+        font-size: 0.9rem !important;
+        font-weight: 500;
+        transition: all 0.2s;
+        box-shadow: 0 1px 2px 0 rgba(0, 0, 0, 0.05);
+    }
+    .stButton>button { background-color: #4F46E5; }
+    .stButton>button:hover { background-color: #4338CA; color: white; }
+    .stDownloadButton>button { background-color: #22C55E !important; }
+    .stDownloadButton>button:hover { background-color: #16A34A !important; }
     
-    if st.session_state.offer_generated:
-        st.info(f"Ready to send: {len(st.session_state.offer_generated)} offers")
+    [data-testid="stSidebar"] { background-color: white; border-right: 1px solid #e5e7eb; }
+    div[data-testid="stMetricValue"] { color: #4F46E5; font-size: 1.5rem !important; }
+</style>
+""", unsafe_allow_html=True)
 
-    if st.button("📧 Send Offers", disabled=not st.session_state.offer_generated):
-        send_offer_email(st.session_state.offer_generated)
+with st.sidebar:
+    st.title("🏢 Workspace")
+    st.markdown("---")
+    menu = st.radio("Navigation", 
+        ["📥 Data Entry", "📄 Offer Letters", "🎓 Certificates", "📊 Batch Operations", "📧 Custom Mailing"],
+        label_visibility="collapsed"
+    )
+    st.markdown("---")
+    st.metric("Total Roster", len(st.session_state.shared_data))
+    if st.button("🗑️ Clear Session Data", use_container_width=True):
+        st.session_state.shared_data = []
+        st.session_state.offer_generated = []
+        st.session_state.cert_generated = []
+        st.session_state.offer_count = 0
+        st.session_state.cert_count = 0
+        st.rerun()
 
-with tab2:
-    st.header("Certificates (using shared data)")
-    col1, col2 = st.columns(2)
-    cert_template_status = "✅ Found" if os.path.exists('certificate_template.docx') else "❌ Missing"
-    col1.metric("Cert Template", cert_template_status)
-    col2.metric("Cert Generated", len(st.session_state.cert_generated))
+if menu == "📥 Data Entry":
+    st.header("Data Initialization")
+    st.markdown("Upload your employee or student roster to prime the generation pipelines.")
     
-    if st.button("🎓 Generate Certs from Shared Data", disabled=not st.session_state.shared_data):
-        with st.spinner("Generating certificates..."):
-            st.session_state.cert_generated = generate_certificate(st.session_state.shared_data)
-            st.session_state.cert_count = len(st.session_state.cert_generated)
-        
-        st.success(f"✅ {st.session_state.cert_count} certificates generated!")
-        st.subheader("Generated Files:")
-        for item in st.session_state.cert_generated:
-            filename = os.path.basename(item.get('pdf_path') or item.get('pdf', ''))
-            st.success(f"📄 {filename} → {item['name']}")
-        
-        st.download_button("📦 Download Certs ZIP", create_zip(CERT_OUTPUT_FOLDER), "certs.zip", "application/zip")
-    
-    if st.session_state.cert_generated:
-        st.info(f"Ready to send: {len(st.session_state.cert_generated)} certs")
-    
-    if st.button("📧 Send Certs", disabled=not st.session_state.cert_generated):
-        send_certificate_email(st.session_state.cert_generated)
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        uploaded_shared = st.file_uploader("Upload Master Excel Workbook", type=['xlsx', 'xls'], key="shared_upload")
+        if uploaded_shared:
+            try:
+                df = pd.read_excel(uploaded_shared)
+                msg = validate_excel(df, OFFER_REQUIRED_COLUMNS, CERT_REQUIRED_COLUMNS)
+                if DEBUG:
+                    st.info(f"📊 Analysis: {msg}")
+                shared_data = df.fillna('').to_dict('records')
+                normalized_data = []
+                for row in shared_data:
+                    new_row = {}
+                    for k, v in row.items():
+                        k_str = str(k).strip().lower().replace(' ', '_')
+                        if k_str == 'help_stud':
+                            k_str = 'techiehelp_student_id'
+                        new_row[k_str] = str(v).strip() if pd.notna(v) else ''
+                    normalized_data.append(new_row)
+                st.session_state.shared_data = normalized_data
+                st.success(f"✅ Roster synchronized with **{len(st.session_state.shared_data)}** verified records.")
+                
+                if DEBUG:
+                    st.dataframe(pd.DataFrame(st.session_state.shared_data), use_container_width=True)
+            except Exception as e:
+                st.error(f"Operation failed: {e}")
+    with col2:
+        st.info("💡 **Formatting Rule:** Ensure your core columns include `Name`, `Email`, and `Domain`.")
 
-with tab3:
-    st.header("📧 Email Summary & Bulk Send")
+elif menu == "📄 Offer Letters":
+    st.header("Offer Compilations")
+    offer_template_status = "Active" if os.path.exists('offer_template.docx') else "Missing Configuration"
+    
     col1, col2, col3 = st.columns(3)
-    col1.metric("Offers Ready", st.session_state.offer_count)
-    col2.metric("Certs Ready", st.session_state.cert_count)
-    col3.metric("Total", st.session_state.offer_count + st.session_state.cert_count)
+    col1.metric("System Template", offer_template_status)
+    col2.metric("Eligible Entries", len([r for r in st.session_state.shared_data if all(str(r.get(c, '')).strip() for c in OFFER_REQUIRED_COLUMNS)]) if st.session_state.shared_data else 0)
+    col3.metric("Compiled Archive", st.session_state.offer_count)
+
+    st.markdown("---")
+    
+    act_col, _ = st.columns([1, 3])
+    with act_col:
+        if st.button("🚀 Process Workload", disabled=not st.session_state.shared_data):
+            with st.spinner("Processing rendering tasks..."):
+                st.session_state.offer_generated = generate_offer_letter(st.session_state.shared_data)
+                st.session_state.offer_count = len(st.session_state.offer_generated)
+        
+    if len(st.session_state.offer_generated) > 0:
+        st.success(f"Processing complete: {st.session_state.offer_count} artifacts generated.")
+        
+        post_col1, post_col2, post_col3 = st.columns([1, 1, 2])
+        with post_col1:
+            st.download_button("📦 Download ZIP Archive", create_zip(OFFER_OUTPUT_FOLDER), "offers.zip", "application/zip")
+        with post_col2:
+            if st.button("📧 Send Offer Emails"):
+                send_offer_email(st.session_state.offer_generated)
+        
+        with st.expander("View Audit Logs"):
+            for item in st.session_state.offer_generated:
+                filename = os.path.basename(item.get('pdf_path') or item.get('pdf', ''))
+                st.markdown(f"**{item['name']}** → `{filename}`")
+
+elif menu == "🎓 Certificates":
+    st.header("Certificate Issuance")
+    cert_template_status = "Active" if os.path.exists('certificate_template.docx') else "Missing Configuration"
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("System Template", cert_template_status)
+    col2.metric("Eligible Entries", len([r for r in st.session_state.shared_data if all(str(r.get(c, '')).strip() for c in CERT_REQUIRED_COLUMNS)]) if st.session_state.shared_data else 0)
+    col3.metric("Compiled Archive", st.session_state.cert_count)
+
+    st.markdown("---")
+    
+    act_col_c, _ = st.columns([1, 3])
+    with act_col_c:
+        if st.button("🎓 Process Certificates", disabled=not st.session_state.shared_data):
+            with st.spinner("Processing rendering tasks..."):
+                st.session_state.cert_generated = generate_certificate(st.session_state.shared_data)
+                st.session_state.cert_count = len(st.session_state.cert_generated)
+        
+    if len(st.session_state.cert_generated) > 0:
+        st.success(f"Processing complete: {st.session_state.cert_count} certificates generated.")
+        
+        post_col_c1, post_col_c2, post_col_c3 = st.columns([1, 1, 2])
+        with post_col_c1:
+            st.download_button("📦 Download ZIP Archive", create_zip(CERT_OUTPUT_FOLDER), "certs.zip", "application/zip")
+        with post_col_c2:
+            if st.button("📧 Send Certificate Emails"):
+                send_certificate_email(st.session_state.cert_generated)
+        
+        with st.expander("View Audit Logs"):
+            for item in st.session_state.cert_generated:
+                filename = os.path.basename(item.get('pdf_path') or item.get('pdf', ''))
+                st.markdown(f"**{item['name']}** → `{filename}`")
+
+elif menu == "📊 Batch Operations":
+    st.header("Asset Distribution")
+    st.markdown("Review operational readiness and execute outbound distribution.")
+    
+    col1, col2, col3 = st.columns(3)
+    col1.metric("Offers Queued", st.session_state.offer_count)
+    col2.metric("Certificates Queued", st.session_state.cert_count)
+    col3.metric("Total Load", st.session_state.offer_count + st.session_state.cert_count)
     
     all_data = st.session_state.offer_generated + st.session_state.cert_generated
+    
+    st.markdown("---")
     if all_data:
-        st.info(f"📊 Total ready: {len(all_data)} ({st.session_state.offer_count} offers + {st.session_state.cert_count} certs)")
-    
-        if st.button("🚀 Send All Emails", disabled=not all_data):
-            with st.spinner("Sending all emails..."):
-                sent_offers = 0
-                sent_certs = 0
-                if st.session_state.offer_generated:
-                    results_offer = send_offer_email(st.session_state.offer_generated)
-                    sent_offers = results_offer.get('sent', 0)
-                if st.session_state.cert_generated:
-                    results_cert = send_certificate_email(st.session_state.cert_generated)
-                    sent_certs = results_cert.get('sent', 0)
-                total_sent = sent_offers + sent_certs
-                st.success(f"✅ Sent {total_sent}/{len(all_data)} total emails ({sent_offers} offers + {sent_certs} certs)")
-                st.balloons()
+        st.info(f"System primed for dispatch. Conveying {len(all_data)} outbound items.")
+        batch_col, _ = st.columns([1, 3])
+        with batch_col:
+            if st.button("🚀 Execute Global Dispatch", disabled=not all_data):
+                with st.spinner("Transmitting data network..."):
+                    sent_offers, sent_certs = 0, 0
+                    if st.session_state.offer_generated:
+                        results_offer = send_offer_email(st.session_state.offer_generated)
+                        sent_offers = results_offer.get('sent', 0)
+                    if st.session_state.cert_generated:
+                        results_cert = send_certificate_email(st.session_state.cert_generated)
+                        sent_certs = results_cert.get('sent', 0)
+                    total_sent = sent_offers + sent_certs
+                    st.success(f"✅ Operations complete. Successfully fired {total_sent}/{len(all_data)} dispatches.")
+                    st.balloons()
     else:
-        st.warning("❌ No documents ready to send. Generate offers/certs first.")
+        st.warning("Action restricted: Provide operational assets before firing dispatch execution.")
+        
+elif menu == "📧 Custom Mailing":
+    st.header("📧 Custom Mailing")
+    st.markdown("Deploy clean text, multimedia links, and file payloads across your targeted rosters.")
     
-    st.info("💡 Configure `.streamlit/secrets.toml` for emails:")
-    st.code("""
-[gmail]
-sender_email = "your@gmail.com"
-sender_password = "your_app_password"
-smtp_server = "smtp.gmail.com"
-smtp_port = 587
-""")
-
-with tab4:
-    st.header("📧 Bulk Email Sender")
-    st.markdown("Send custom emails with attachments to a list of email addresses from an Excel file.")
+    input_source = st.radio("Email Source Parameter", ["Upload Excel", "Manual Input"], horizontal=True)
+    valid_recipients = []
     
-    bulk_upload = st.file_uploader("Upload Excel with an 'email' column", type=['xlsx', 'xls'], key="bulk_email_upload")
+    if input_source == "Upload Excel":
+        bulk_upload = st.file_uploader("Upload Mailing List ('email' column required)", type=['xlsx', 'xls'], key="custom_mail_excel")
+        if bulk_upload:
+            try:
+                df_bulk = pd.read_excel(bulk_upload)
+                email_col = next((c for c in df_bulk.columns if str(c).strip().lower() == 'email'), None)
+                name_col = next((c for c in df_bulk.columns if str(c).strip().lower() == 'name'), None)
+                if not email_col:
+                    st.error("❌ Schema mismatch: The provided Excel must contain an 'email' column.")
+                else:
+                    for row in df_bulk.to_dict('records'):
+                        email_val = str(row.get(email_col, '')).strip()
+                        if email_val and pd.notna(row.get(email_col)) and '@' in email_val:
+                            valid_recipients.append({'email': email_val, 'name': str(row.get(name_col, 'User')).strip() if name_col else 'User'})
+            except Exception as e:
+                st.error(f"Error parsing Excel block: {e}")
+    else:
+        manual_emails = st.text_area("Enter absolute emails (comma-separated)", "")
+        if manual_emails:
+            for email in manual_emails.split(','):
+                email = email.strip()
+                if email and '@' in email:
+                    valid_recipients.append({'email': email, 'name': 'User'})
+                    
+    with st.container():
+        st.subheader("Payload Composer")
+        subject = st.text_input("Title Header *", "")
+        message = st.text_area("Message Body (Links permitted)", "Hello {name},\n\n\nRegards,\nTeam")
+        st.caption("Parameters: map {name} dynamically inside the body string.")
+        
+        attachments = st.file_uploader("Upload Payload Assets", type=['pdf', 'docx', 'png', 'jpg', 'jpeg', 'mp4', 'txt'], accept_multiple_files=True)
     
-    if bulk_upload:
-        try:
-            df_bulk = pd.read_excel(bulk_upload)
-            email_col = next((c for c in df_bulk.columns if str(c).strip().lower() == 'email'), None)
-            name_col = next((c for c in df_bulk.columns if str(c).strip().lower() == 'name'), None)
+    if len(valid_recipients) > 0:
+        st.success(f"✅ Indexed {len(valid_recipients)} target leads.")
+        
+        with st.expander("👁️ Preview Broadcast Payload", expanded=False):
+            st.write(f"**Target Volume:** {len(valid_recipients)}")
+            st.write(f"**Subject:** {subject if subject else '⚠ (Missing)'}")
+            st.write(f"**Files:** {len(attachments)} attached")
+            if attachments:
+                for a in attachments:
+                    st.caption(f"📎 {a.name}")
+            st.markdown("---")
+            st.write(message.replace('{name}', 'PreviewUser'))
             
-            if not email_col:
-                st.error("❌ The uploaded Excel must contain an 'email' column.")
-            else:
-                raw_emails = df_bulk.to_dict('records')
-                valid_recipients = []
-                for row in raw_emails:
-                    email_val = str(row.get(email_col, '')).strip()
-                    if email_val and pd.notna(row.get(email_col)) and '@' in email_val:
-                        name_val = str(row.get(name_col, 'User')).strip() if name_col else 'User'
-                        valid_recipients.append({'email': email_val, 'name': name_val})
+        missing_core_params = not subject or (not message.strip() and not attachments)
+        
+        st.markdown("---")
+        total_emails = len(valid_recipients)
+        st.write(f"**Queued Pipeline Vol:** {total_emails}")
+        
+        if total_emails > 50:
+            st.warning("⚠️ High Volume Operations: Deploying upwards of 50 payloads. Confirm SMTP server burst limits accommodate heavy outbound traffic.")
+            
+        auto_test_mode = total_emails <= 1
+        is_test = st.checkbox("☑ Send as test (only first email mapped)", value=auto_test_mode)
+        
+        target_recipients = [valid_recipients[0]] if is_test else valid_recipients
+        btn_disabled = missing_core_params
+        
+        if len(target_recipients) > 1:
+            confirm = st.checkbox(f"🚨 You are about to deploy broadcast payloads to {len(target_recipients)} distinct users. Check to authorize transmission.")
+            if not confirm:
+                btn_disabled = True
                 
-                st.success(f"✅ Extracted {len(valid_recipients)} valid emails.")
-                
-                with st.form("bulk_email_form"):
-                    st.subheader("Email Composer")
-                    subject = st.text_input("Subject", "Important Notification")
-                    message = st.text_area("Message", "Hello {name},\n\nYour message here...\n\nBest,\nTeam")
-                    st.caption("Tip: You can use {name} to personalize if your Excel has a 'name' column.")
+        act_col, _ = st.columns([1, 2])
+        with act_col:
+            if st.button("🚀 Send Emails", disabled=btn_disabled, use_container_width=True):
+                attachment_paths = []
+                temp_dir = "temp_attachments"
+                os.makedirs(temp_dir, exist_ok=True)
+                if attachments:
+                    for attachment in attachments:
+                        path = os.path.join(temp_dir, attachment.name)
+                        with open(path, "wb") as f:
+                            f.write(attachment.getbuffer())
+                        attachment_paths.append(path)
+                        
+                with st.spinner("Executing dispatch sequence..."):
+                    results = execute_bulk_custom_email(target_recipients, subject, message, attachment_paths)
                     
-                    attachment = st.file_uploader("Optional Attachment (PDF, DOCX, Image)", type=['pdf', 'docx', 'png', 'jpg', 'jpeg'])
-                    
-                    submitted = st.form_submit_button("🚀 Send to All", disabled=len(valid_recipients)==0)
-                    
-                    if submitted:
-                        attachment_path = None
-                        if attachment:
-                            temp_dir = "temp_attachments"
-                            if not os.path.exists(temp_dir):
-                                os.makedirs(temp_dir)
-                            attachment_path = os.path.join(temp_dir, attachment.name)
-                            with open(attachment_path, "wb") as f:
-                                f.write(attachment.getbuffer())
+                if results:
+                    st.success(f"✅ Success. Transmitted {results['sent']}/{len(target_recipients)} payloads.")
+                    if results['errors']:
+                        st.error(f"Failed Delivery Exceptions: {len(results['errors'])}.")
+                        with st.expander("Inspect Failure Nodes"):
+                            for e in results['errors']:
+                                st.write(f"- {e['email']}: {e['error']}")
                                 
-                        with st.spinner("Sending bulk custom emails..."):
-                            results = execute_bulk_custom_email(valid_recipients, subject, message, attachment_path)
-                            
-                        if results:
-                            st.success(f"✅ Successfully sent {results['sent']}/{len(valid_recipients)} emails.")
-                            if results['errors']:
-                                st.error(f"❌ Failed to send {len(results['errors'])} emails.")
-                                with st.expander("View Failed Emails"):
-                                    for e in results['errors']:
-                                        st.write(f"- {e['email']}: {e['error']}")
-                                        
-                        if attachment_path and os.path.exists(attachment_path):
-                            try:
-                                os.remove(attachment_path)
-                            except:
-                                pass
-                            
-        except Exception as e:
-            st.error(f"Error processing file: {e}")
+                for path in attachment_paths:
+                    try: os.remove(path)
+                    except: pass
+
+        if missing_core_params:
+            st.error("⚠️ Transmission Locked: Subject Field and Payload Data (Text/Attachments) are required parameters.")
 
 # App runs directly without main() call
 st.caption("✅ Syntax fixed - Bulk offer letter generator ready!")
