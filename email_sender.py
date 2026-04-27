@@ -140,7 +140,21 @@ class EmailSender:
         Returns:
             tuple: (success, message)
         """
-        subject = "🎉 Congratulations! You’re Selected for TechieHelp Internship 2026"
+        # --- Debug logging ---
+        print(f"[send_offer_letter] Attempting → email={recipient_email}, name={recipient_name}, attachment={attachment_path}")
+        
+        # --- Upfront attachment validation ---
+        if not attachment_path:
+            msg = f"No attachment path provided for {recipient_email}"
+            print(f"[send_offer_letter] ERROR: {msg}")
+            return False, msg
+        
+        if not os.path.exists(attachment_path):
+            msg = f"Attachment file not found: {attachment_path}"
+            print(f"[send_offer_letter] ERROR: {msg}")
+            return False, msg
+        
+        subject = f"TechieHelp Internship Offer Letter | {recipient_name}"
         
         display_name = recipient_name if recipient_name and recipient_name.strip() else "Candidate"
         
@@ -153,36 +167,46 @@ class EmailSender:
 </style>
 </head>
 <body>
-    <p>Dear {display_name},</p>
+    <p>Dear {recipient_name},</p>
     
-    <p>You have been selected for the TECHIEHELP – Industry-Oriented Internship Program 2026.<br>
-    We’re excited to have you onboard as you take the next step toward skill development and career growth.</p>
+    <p>We are pleased to inform you that you have been selected for the TechieHelp Industry-Oriented Internship Program 2026.</p>
     
-    <p>📝 <strong>Important:</strong> Please ensure that you select your internship department correctly (e.g., Android Developer) during further processes.</p>
+    <p>Congratulations on your successful selection. We are delighted to welcome you to TechieHelp and look forward to supporting your professional growth and career journey.</p>
     
-    <p>🏅 <strong>Claim Your LinkedIn Internship Badge:</strong><br>
+    <p>Please find your Internship Offer Letter attached with this email.</p>
+    
+    <p>Your internship tenure is scheduled to commence from 1st May 2026 and will continue until 1st June 2026.</p>
+    
+    <p>As part of the onboarding process, kindly complete the following LinkedIn formalities:</p>
+    
+    <p>Mandatory Instructions:</p>
+    
+    <p>1. Create your official TechieHelp Internship Badge using the link below:<br>
     <a href="https://twibbo.nz/techiehelpinternsbadges">https://twibbo.nz/techiehelpinternsbadges</a></p>
     
-    <p>📌 <strong>Learn more about your internship program:</strong><br>
-    <a href="https://www.techiehelp.in/careers/training-internships">https://www.techiehelp.in/careers/training-internships</a></p>
+    <p>2. Update your LinkedIn profile picture with the TechieHelp Internship Badge.</p>
     
-    <p>⚠️ Please check your Inbox & Spam folder regularly for important updates and communication.</p>
+    <p>3. Share your Internship Offer Letter on LinkedIn as a post.</p>
     
-    <p>Best Regards,<br>
-    Team TechieHelp<br>
-    Empowering Students. Building Futures.</p>
+    <p>4. Tag TechieHelp in your LinkedIn post.</p>
     
-    <p>🌐 <a href="https://www.techiehelp.in">https://www.techiehelp.in</a><br>
-    📧 support@techiehelp.in</p>
+    <p>5. Follow the official TechieHelp LinkedIn page for future updates and opportunities.</p>
+    
+    <p>We congratulate you once again and wish you a successful and rewarding internship journey with TechieHelp.</p>
+    
+    <p>Warm Regards,</p>
+    
+    <p>HR Department<br>
+    TechieHelp</p>
     
     <p>Amit Kumar<br>
-    Founder & CEO – TechieHelp<br>
-    +91 76738 25079<br>
-    Jodhpur, Rajasthan – India</p>
+    Founder & CEO – TechieHelp</p>
 </body>
 </html>"""
         
-        return self.send_email(recipient_email, recipient_name, subject, body, attachment_path, is_html=True)
+        success, msg = self.send_email(recipient_email, recipient_name, subject, body, attachment_path, is_html=True)
+        print(f"[send_offer_letter] Result → success={success}, msg={msg}")
+        return success, msg
     
     def send_batch_emails(self, recipients, attachment_folder=None):
         """

@@ -181,17 +181,117 @@ def generate_certificate(shared_data):
     return results
 
 def send_offer_email(offer_list):
-    """Send offer emails using EmailSender."""
+    """Send offer emails using EmailSender with batching and reliability controls."""
+    import time
+    import os
 
     if not st.secrets.get("gmail"):
         st.error("❌ Configure .streamlit/secrets.toml with Gmail app password")
         st.stop()
     gmail = st.secrets["gmail"]
     sender = EmailSender(gmail.get("smtp_server"), int(gmail.get("smtp_port")), gmail["sender_email"], gmail["sender_password"])
-    results = sender.send_batch_emails(offer_list)
-    st.success(f"✅ Sent {results.get('sent', 0)}/{len(offer_list)} offer emails")
-    if results.get('errors'):
-        st.error(f"Failed {len(results['errors'])} emails")
+    
+    total_emails = len(offer_list)
+    results = {'sent': 0, 'errors': [], 'total': total_emails}
+    
+    # UI Elements
+    progress_placeholder = st.empty()
+    progress_bar = progress_placeholder.progress(0)
+    status_text = st.empty()
+    debug_log = st.empty()
+    
+    # Configuration
+    BATCH_SIZE = 25
+    EMAIL_DELAY = 1.5
+    BATCH_DELAY = 8
+    MAX_RETRIES = 2
+    
+    for i, offer in enumerate(offer_list):
+        progress_bar.progress((i + 1) / total_emails)
+        
+        email = str(offer.get('email', '')).strip()
+        name = offer.get('name', 'User')
+        pdf_path = offer.get('pdf_path')
+        
+        # Resolve absolute path (fixes working-directory issues)
+        if pdf_path:
+            pdf_path = os.path.abspath(pdf_path)
+        
+        # Calculate batch info
+        current_batch = (i // BATCH_SIZE) + 1
+        total_batches = (total_emails + BATCH_SIZE - 1) // BATCH_SIZE
+        
+        status_text.text(f"Batch {current_batch}/{total_batches} | Sending {i+1}/{total_emails} → {email}")
+        
+        # Debug: log exactly what path and email are being processed
+        print(f"[OFFER EMAIL] #{i+1} | To: {email} | Name: {name} | PDF: {pdf_path}")
+        
+        # 1. Email Validation
+        if not email or '@' not in email or '.' not in email:
+            print(f"[OFFER EMAIL] SKIP - Invalid email: {email}")
+            results['errors'].append({'email': email, 'error': 'Invalid email format — skipped'})
+            continue
+            
+        # 2. Attachment Safety — warn but do NOT block sending
+        if not pdf_path:
+            print(f"[OFFER EMAIL] WARNING - No pdf_path for {email}")
+            results['errors'].append({'email': email, 'error': 'No attachment path provided — skipped'})
+            continue
+        
+        if not os.path.exists(pdf_path):
+            print(f"[OFFER EMAIL] WARNING - File NOT FOUND: {pdf_path}")
+            debug_log.warning(f"⚠️ Attachment not found for {name} ({email}): {pdf_path}")
+            results['errors'].append({'email': email, 'error': f'Attachment not found: {pdf_path}'})
+            continue
+        
+        # 3. Send with Retry Logic
+        success = False
+        msg = ""
+        
+        for attempt in range(MAX_RETRIES + 1):
+            if attempt > 0:
+                status_text.text(f"Retrying ({attempt}/{MAX_RETRIES}) {i+1}/{total_emails} → {email}")
+                print(f"[OFFER EMAIL] Retry {attempt} for {email}")
+                time.sleep(2)  # delay before retry
+                
+            try:
+                success, msg = sender.send_offer_letter(email, name, pdf_path)
+                print(f"[OFFER EMAIL] Result for {email}: success={success}, msg={msg}")
+            except Exception as e:
+                success = False
+                msg = str(e)
+                print(f"[OFFER EMAIL] Exception for {email}: {e}")
+                
+            if success:
+                break
+                
+        if success:
+            results['sent'] += 1
+        else:
+            results['errors'].append({'email': email, 'error': msg})
+            
+        # 4. Delay Control
+        if (i + 1) < total_emails:  # Don't delay after the last email
+            if (i + 1) % BATCH_SIZE == 0:
+                status_text.text(f"Batch {current_batch} complete. Cooling down for {BATCH_DELAY}s...")
+                time.sleep(BATCH_DELAY)
+            else:
+                time.sleep(EMAIL_DELAY)
+            
+    # Cleanup UI
+    progress_placeholder.empty()
+    status_text.empty()
+    debug_log.empty()
+    
+    # Final Reporting
+    st.success(f"✅ Sent {results['sent']}/{total_emails} offer emails")
+    
+    if results['errors']:
+        st.error(f"⚠️ Failed to send {len(results['errors'])} emails")
+        with st.expander("View Failure Details"):
+            for err in results['errors']:
+                st.write(f"- **{err['email']}**: {err['error']}")
+        
     return results
 
 def send_certificate_email(cert_list):
